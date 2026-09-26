@@ -142,104 +142,171 @@ def click_action(driver, elem):
         return False
 
 
+def wait_for_element(driver, by, value, timeout=25):
+    """Espera explícita a que un elemento exista en el DOM."""
+
+    return WebDriverWait(driver, timeout).until(
+        EC.presence_of_element_located((by, value))
+    )
+
+
+def click_button_with_text(driver, text, timeout=25):
+    """Espera a que aparezca un <button> cuyo texto sea exactamente
+    'text', y lo pulsa. Lanza excepción si no aparece a tiempo."""
+
+    def find_button(d):
+
+        buttons = d.find_elements(By.TAG_NAME, "button")
+
+        for button in buttons:
+
+            try:
+
+                if button.text.strip() == text:
+                    return button
+
+            except Exception:
+                pass
+
+        return False
+
+    button = WebDriverWait(driver, timeout).until(find_button)
+
+    click_js(driver, button)
+
+    return button
+
+
 def login_dynamed(driver, email, password):
 
     driver.get(LOGIN_URL)
 
-    time.sleep(5)
+    # Esperar a que la home cargue de verdad antes de buscar "Sign In"
+    wait_for_element(driver, By.TAG_NAME, "a", timeout=30)
 
     # SIGN IN
-    links = driver.find_elements(By.TAG_NAME, "a")
+    def find_sign_in(d):
 
-    for link in links:
+        links = d.find_elements(By.TAG_NAME, "a")
 
-        try:
+        for link in links:
 
-            if "Sign In" in link.text.strip():
+            try:
 
-                click_js(driver, link)
+                if "Sign In" in link.text.strip():
+                    return link
 
-                break
+            except Exception:
+                pass
 
-        except Exception:
-            pass
+        return False
 
-    time.sleep(5)
+    sign_in_link = WebDriverWait(driver, 30).until(find_sign_in)
 
-    # COOKIES
-    buttons = driver.find_elements(By.TAG_NAME, "button")
+    click_js(driver, sign_in_link)
 
-    for button in buttons:
+    # COOKIES (opcional: si no aparece en unos segundos, seguimos)
+    try:
 
-        try:
+        def find_accept(d):
 
-            if button.text.strip() == "Accept":
+            buttons = d.find_elements(By.TAG_NAME, "button")
 
-                click_js(driver, button)
+            for button in buttons:
 
-                time.sleep(2)
+                try:
 
-                break
+                    if button.text.strip() == "Accept":
+                        return button
 
-        except Exception:
-            pass
+                except Exception:
+                    pass
 
-    # EMAIL
-    username = driver.find_element(By.ID, "username")
+            return False
+
+        accept_button = WebDriverWait(driver, 8).until(find_accept)
+
+        click_js(driver, accept_button)
+
+    except Exception:
+        pass
+
+    # EMAIL: esperar explícitamente a que exista el campo
+    try:
+
+        username = wait_for_element(driver, By.ID, "username", timeout=30)
+
+    except Exception as e:
+
+        driver.save_screenshot("/tmp/debug_login_email.png")
+
+        raise Exception(
+            "No apareció el campo de email a tiempo. "
+            "Captura guardada en /tmp/debug_login_email.png"
+        ) from e
 
     username.clear()
 
     username.send_keys(email)
 
-    # CONTINUE EMAIL
-    buttons = driver.find_elements(By.TAG_NAME, "button")
+    # CONTINUE tras el email
+    try:
 
-    for button in buttons:
+        click_button_with_text(driver, "Continue", timeout=15)
 
-        try:
+    except Exception as e:
 
-            if button.text.strip() == "Continue":
+        driver.save_screenshot("/tmp/debug_login_continue1.png")
 
-                click_js(driver, button)
+        raise Exception(
+            "No apareció el botón Continue tras el email. "
+            "Captura guardada en /tmp/debug_login_continue1.png"
+        ) from e
 
-                break
+    # PASSWORD: esperar explícitamente a que exista el campo
+    try:
 
-        except Exception:
-            pass
+        password_field = wait_for_element(driver, By.ID, "password", timeout=30)
 
-    time.sleep(5)
+    except Exception as e:
 
-    # PASSWORD
-    password_field = driver.find_element(By.ID, "password")
+        driver.save_screenshot("/tmp/debug_login_password.png")
+
+        raise Exception(
+            "No apareció el campo de contraseña a tiempo. "
+            "Captura guardada en /tmp/debug_login_password.png"
+        ) from e
 
     password_field.clear()
 
     password_field.send_keys(password)
 
-    # LOGIN
-    buttons = driver.find_elements(By.TAG_NAME, "button")
+    # LOGIN: pulsar el Continue final
+    try:
 
-    login_button = None
+        click_button_with_text(driver, "Continue", timeout=15)
 
-    for button in buttons:
+    except Exception as e:
 
-        try:
+        driver.save_screenshot("/tmp/debug_login_continue2.png")
 
-            if button.text.strip() == "Continue":
+        raise Exception(
+            "No apareció el botón Continue final de login. "
+            "Captura guardada en /tmp/debug_login_continue2.png"
+        ) from e
 
-                login_button = button
+    # Esperar a que el login se complete de verdad (desaparece el
+    # formulario y cargamos ya la web logueados)
+    try:
 
-                break
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
 
-        except Exception:
-            pass
+        time.sleep(3)  # pequeño margen para que la SPA termine de renderizar
 
-    if login_button is None:
-        raise Exception("No se encontró el botón Continue de login.")
-
-    click_js(driver, login_button)
-
-    time.sleep(8)
+    except Exception:
+        pass
 
 
 # =========================================================
@@ -673,6 +740,15 @@ if st.button("🚀 Ejecutar Pregunteitor + Respondeitor"):
         st.error("No se pudo completar el login.")
 
         st.exception(e)
+
+        # Si login_dynamed guardó una captura de diagnóstico, mostrarla
+        import glob
+
+        screenshots = glob.glob("/tmp/debug_login_*.png")
+
+        for shot in screenshots:
+
+            st.image(shot, caption=shot)
 
         driver.quit()
 
