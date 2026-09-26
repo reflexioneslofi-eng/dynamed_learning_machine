@@ -2,6 +2,7 @@ import time
 
 import pandas as pd
 import streamlit as st
+
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -12,32 +13,34 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import StaleElementReferenceException
 
 
+###############################################################################
+# CONFIGURACIÓN GENERAL
+###############################################################################
+
 st.set_page_config(
     page_title="Pregunteitor + Respondeitor",
-    page_icon="🎓"
+    page_icon="📚"
 )
 
-st.title("🎓 Pregunteitor + Respondeitor")
-
-st.write(
-    "1️⃣ Busca los topics en DynaMed para generar créditos CME.  \n"
-    "2️⃣ Reclama automáticamente todos los créditos generados."
-)
+st.title("📚 Pregunteitor + 🎓 Respondeitor")
 
 
-# =========================================================
-# CONFIGURACIÓN GENERAL
-# =========================================================
+# ---------------------------------------------------------------------------
+# Pregunteitor
+# ---------------------------------------------------------------------------
+
+N_TOPICS_TEST = 99
+CSV_OPTIONS = [f"topics_{i}.csv" for i in range(1, 11)]
+
+
+# ---------------------------------------------------------------------------
+# Respondeitor
+# ---------------------------------------------------------------------------
 
 LOGIN_URL = "https://www.dynamed.com"
-
 AVAILABLE_CREDITS_URL = "https://www.dynamed.com/cme/available-credits"
 
 PAGE_TIMEOUT = 60
-
-N_TOPICS_TEST = 99
-
-CSV_OPTIONS = [f"topics_{i}.csv" for i in range(1, 11)]
 
 OTHER_TEXT = "Other"
 
@@ -49,17 +52,21 @@ MAX_PARTS = 10
 MAX_CREDITS = 200
 
 
-# =========================================================
+###############################################################################
 # SELECCIÓN DE CSV
-# =========================================================
+###############################################################################
 
 TOPICS_FILE = st.selectbox(
     "Selecciona el archivo de topics a usar",
     CSV_OPTIONS
 )
 
-try:
 
+###############################################################################
+# CARGAR CSV
+###############################################################################
+
+try:
     df = pd.read_csv(
         TOPICS_FILE,
         sep=";",
@@ -68,11 +75,13 @@ try:
 
 except Exception as e:
 
-    st.error(f"No se pudo cargar {TOPICS_FILE}")
+    st.error(
+        f"No se pudo cargar {TOPICS_FILE}"
+    )
 
     st.exception(e)
-
     st.stop()
+
 
 if "topic" not in df.columns:
 
@@ -83,27 +92,43 @@ if "topic" not in df.columns:
 
     st.stop()
 
-topics = df["topic"].dropna().astype(str).tolist()
+
+topics = (
+    df["topic"]
+    .dropna()
+    .astype(str)
+    .tolist()
+)
 
 topics_test = topics[:N_TOPICS_TEST]
 
-st.success(f"{TOPICS_FILE} cargado correctamente: {len(topics)} topics.")
+st.success(
+    f"{TOPICS_FILE} cargado correctamente: "
+    f"{len(topics)} topics."
+)
 
-st.write(f"Se probarán los primeros {len(topics_test)} topics.")
+st.write(
+    f"Se procesarán los primeros {len(topics_test)} topics."
+)
 
 
-# =========================================================
+###############################################################################
 # DATOS DE LOGIN
-# =========================================================
+###############################################################################
 
-email = st.text_input("Email de DynaMed")
+email = st.text_input(
+    "Email de DynaMed"
+)
 
-password = st.text_input("Contraseña de DynaMed", type="password")
+password = st.text_input(
+    "Contraseña de DynaMed",
+    type="password"
+)
 
 
-# =========================================================
-# FUNCIONES AUXILIARES COMUNES
-# =========================================================
+###############################################################################
+# FUNCIONES AUXILIARES — RESPONDEITOR
+###############################################################################
 
 def click_js(driver, elem):
 
@@ -112,13 +137,18 @@ def click_js(driver, elem):
         elem
     )
 
-    driver.execute_script("arguments[0].click();", elem)
+    driver.execute_script(
+        "arguments[0].click();",
+        elem
+    )
 
 
 def click_action(driver, elem):
-    """Click 'real' vía ActionChains. Si el elemento queda stale
-    justo después (porque React ya reaccionó al click), lo
-    consideramos un éxito."""
+    """
+    Click vía ActionChains.
+    Si el elemento queda stale justo después del click
+    porque React ya reaccionó, se considera éxito.
+    """
 
     try:
 
@@ -142,296 +172,6 @@ def click_action(driver, elem):
         return False
 
 
-def wait_for_element(driver, by, value, timeout=25):
-    """Espera explícita a que un elemento exista en el DOM."""
-
-    return WebDriverWait(driver, timeout).until(
-        EC.presence_of_element_located((by, value))
-    )
-
-
-def click_button_with_text(driver, text, timeout=25):
-    """Espera a que aparezca un <button> cuyo texto sea exactamente
-    'text', y lo pulsa. Lanza excepción si no aparece a tiempo."""
-
-    def find_button(d):
-
-        buttons = d.find_elements(By.TAG_NAME, "button")
-
-        for button in buttons:
-
-            try:
-
-                if button.text.strip() == text:
-                    return button
-
-            except Exception:
-                pass
-
-        return False
-
-    button = WebDriverWait(driver, timeout).until(find_button)
-
-    click_js(driver, button)
-
-    return button
-
-
-def login_dynamed(driver, email, password):
-
-    driver.get(LOGIN_URL)
-
-    # Esperar a que la home cargue de verdad antes de buscar "Sign In"
-    wait_for_element(driver, By.TAG_NAME, "a", timeout=30)
-
-    # SIGN IN
-    def find_sign_in(d):
-
-        links = d.find_elements(By.TAG_NAME, "a")
-
-        for link in links:
-
-            try:
-
-                if "Sign In" in link.text.strip():
-                    return link
-
-            except Exception:
-                pass
-
-        return False
-
-    sign_in_link = WebDriverWait(driver, 30).until(find_sign_in)
-
-    click_js(driver, sign_in_link)
-
-    # COOKIES (opcional: si no aparece en unos segundos, seguimos)
-    try:
-
-        def find_accept(d):
-
-            buttons = d.find_elements(By.TAG_NAME, "button")
-
-            for button in buttons:
-
-                try:
-
-                    if button.text.strip() == "Accept":
-                        return button
-
-                except Exception:
-                    pass
-
-            return False
-
-        accept_button = WebDriverWait(driver, 8).until(find_accept)
-
-        click_js(driver, accept_button)
-
-    except Exception:
-        pass
-
-    # EMAIL: esperar explícitamente a que exista el campo
-    try:
-
-        username = wait_for_element(driver, By.ID, "username", timeout=30)
-
-    except Exception as e:
-
-        driver.save_screenshot("/tmp/debug_login_email.png")
-
-        raise Exception(
-            "No apareció el campo de email a tiempo. "
-            "Captura guardada en /tmp/debug_login_email.png"
-        ) from e
-
-    username.clear()
-
-    username.send_keys(email)
-
-    # CONTINUE tras el email
-    try:
-
-        click_button_with_text(driver, "Continue", timeout=15)
-
-    except Exception as e:
-
-        driver.save_screenshot("/tmp/debug_login_continue1.png")
-
-        raise Exception(
-            "No apareció el botón Continue tras el email. "
-            "Captura guardada en /tmp/debug_login_continue1.png"
-        ) from e
-
-    # PASSWORD: esperar explícitamente a que exista el campo
-    try:
-
-        password_field = wait_for_element(driver, By.ID, "password", timeout=30)
-
-    except Exception as e:
-
-        driver.save_screenshot("/tmp/debug_login_password.png")
-
-        raise Exception(
-            "No apareció el campo de contraseña a tiempo. "
-            "Captura guardada en /tmp/debug_login_password.png"
-        ) from e
-
-    password_field.clear()
-
-    password_field.send_keys(password)
-
-    # LOGIN: pulsar el Continue final
-    try:
-
-        click_button_with_text(driver, "Continue", timeout=15)
-
-    except Exception as e:
-
-        driver.save_screenshot("/tmp/debug_login_continue2.png")
-
-        raise Exception(
-            "No apareció el botón Continue final de login. "
-            "Captura guardada en /tmp/debug_login_continue2.png"
-        ) from e
-
-    # Esperar a que el login se complete de verdad (desaparece el
-    # formulario y cargamos ya la web logueados)
-    try:
-
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
-
-        time.sleep(3)  # pequeño margen para que la SPA termine de renderizar
-
-    except Exception:
-        pass
-
-
-# =========================================================
-# FUNCIONES DE PREGUNTEITOR (búsqueda de topics)
-# =========================================================
-
-def search_all_topics(driver, topics_test, status_container):
-
-    for number, topic in enumerate(topics_test, start=1):
-
-        status_container.write(
-            f"**Topic {number}/{len(topics_test)}: {topic}**"
-        )
-
-        driver.get("https://www.dynamed.com")
-
-        time.sleep(5)
-
-        search_box = None
-
-        for _ in range(20):
-
-            try:
-
-                search_box = driver.find_element(By.ID, "autosuggest")
-
-                break
-
-            except Exception:
-
-                time.sleep(1)
-
-        if search_box is None:
-
-            status_container.write("⚠ no se encontró el buscador de DynaMed")
-
-            continue
-
-        search_box.click()
-
-        search_box.send_keys(Keys.CONTROL, "a")
-
-        search_box.send_keys(Keys.BACKSPACE)
-
-        time.sleep(1)
-
-        search_box.send_keys(topic)
-
-        time.sleep(2)
-
-        search_box.send_keys(Keys.ENTER)
-
-        time.sleep(6)
-
-        links = driver.find_elements(By.TAG_NAME, "a")
-
-        target_link = None
-
-        for link in links:
-
-            try:
-
-                href = link.get_attribute("href")
-
-                if not href:
-                    continue
-
-                is_content = (
-                    "/condition/" in href
-                    or "/drug-monograph/" in href
-                    or "/management/" in href
-                    or "/evaluation/" in href
-                    or "/prevention/" in href
-                    or "/procedure/" in href
-                    or "/approach-to/" in href
-                )
-
-                if is_content:
-
-                    target_link = link
-
-                    break
-
-            except Exception:
-                pass
-
-        if target_link is None:
-
-            status_container.write("⚠ no se encontró un resultado de contenido")
-
-            continue
-
-        target_text = target_link.text.strip()
-
-        status_container.write(f"✓ encontrado → {target_text}")
-
-        driver.execute_script("arguments[0].click();", target_link)
-
-        time.sleep(6)
-
-        current_url = driver.current_url
-
-        if (
-            "/condition/" in current_url
-            or "/drug-monograph/" in current_url
-            or "/management/" in current_url
-            or "/evaluation/" in current_url
-            or "/prevention/" in current_url
-            or "/procedure/" in current_url
-            or "/approach-to/" in current_url
-        ):
-
-            status_container.write("✓ abierto")
-
-        else:
-
-            status_container.write(
-                "⚠ el resultado no parece haberse abierto correctamente"
-            )
-
-
-# =========================================================
-# FUNCIONES DE RESPONDEITOR (reclamar créditos)
-# =========================================================
-
 def select_other_and_not_found(driver, max_idle_passes=3):
 
     other_selected = 0
@@ -440,16 +180,17 @@ def select_other_and_not_found(driver, max_idle_passes=3):
     processed = set()
 
     scroll_step = 150
-
     current_y = 0
-
     idle_passes = 0
 
     while True:
 
         found_new_this_pass = False
 
-        labels = driver.find_elements(By.TAG_NAME, "label")
+        labels = driver.find_elements(
+            By.TAG_NAME,
+            "label"
+        )
 
         for label in labels:
 
@@ -457,14 +198,19 @@ def select_other_and_not_found(driver, max_idle_passes=3):
 
                 text = label.text.strip()
 
-                if text not in (OTHER_TEXT, NOT_FOUND_TEXT):
+                if text not in (
+                    OTHER_TEXT,
+                    NOT_FOUND_TEXT
+                ):
                     continue
 
                 unique_key = label.get_attribute("for")
 
                 if not unique_key:
                     unique_key = (
-                        text + "_" + str(round(label.location["y"]))
+                        text
+                        + "_"
+                        + str(round(label.location["y"]))
                     )
 
                 if unique_key in processed:
@@ -494,7 +240,9 @@ def select_other_and_not_found(driver, max_idle_passes=3):
 
         current_y += scroll_step
 
-        driver.execute_script(f"window.scrollTo(0,{current_y});")
+        driver.execute_script(
+            f"window.scrollTo(0,{current_y});"
+        )
 
         time.sleep(0.25)
 
@@ -512,6 +260,9 @@ def select_other_and_not_found(driver, max_idle_passes=3):
 
 
 def click_advance_button(driver):
+    """
+    Busca y pulsa el botón Continue/Submit del cuestionario.
+    """
 
     candidates = driver.find_elements(
         By.XPATH,
@@ -522,17 +273,24 @@ def click_advance_button(driver):
     )
 
     visible_candidates = [
-        e for e in candidates
+        e
+        for e in candidates
         if e.is_displayed() and e.is_enabled()
     ]
 
     if not visible_candidates:
         return False
 
-    return click_action(driver, visible_candidates[0])
+    return click_action(
+        driver,
+        visible_candidates[0]
+    )
 
 
 def click_prepare_button(driver):
+    """
+    Busca y pulsa el botón Prepare de un crédito disponible.
+    """
 
     candidates = driver.find_elements(
         By.XPATH,
@@ -540,14 +298,18 @@ def click_prepare_button(driver):
     )
 
     visible_candidates = [
-        e for e in candidates
+        e
+        for e in candidates
         if e.is_displayed() and e.is_enabled()
     ]
 
     if not visible_candidates:
         return False
 
-    return click_action(driver, visible_candidates[0])
+    return click_action(
+        driver,
+        visible_candidates[0]
+    )
 
 
 def select_all_credits(driver):
@@ -560,8 +322,10 @@ def select_all_credits(driver):
     for elem in all_candidates:
 
         try:
+
             click_js(driver, elem)
             return True
+
         except Exception:
             pass
 
@@ -575,100 +339,623 @@ def process_one_questionnaire(driver, status):
 
     for part in range(1, MAX_PARTS + 1):
 
-        status.write(f"  · Procesando parte {part}...")
+        status.write(
+            f"  · Procesando parte {part}..."
+        )
 
-        o, nf = select_other_and_not_found(driver)
+        o, nf = select_other_and_not_found(
+            driver
+        )
 
         total_other += o
         total_not_found += nf
 
         time.sleep(0.5)
 
-        advanced = click_advance_button(driver)
+        advanced = click_advance_button(
+            driver
+        )
 
         if not advanced:
-            status.write("  · No hay botón de avance, cuestionario terminado.")
+
+            status.write(
+                "  · No hay botón de avance, "
+                "cuestionario terminado."
+            )
+
             break
 
         time.sleep(3)
 
         if "questionnaire" not in driver.current_url.lower():
-            status.write("  · ✓ Cuestionario completado.")
+
+            status.write(
+                "  · ✓ Cuestionario completado."
+            )
+
             break
 
     return total_other, total_not_found
 
 
-def claim_all_credits(driver):
+###############################################################################
+# LOGIN — SE HACE UNA SOLA VEZ
+###############################################################################
 
-    total_credits_done = 0
-    grand_total_other = 0
-    grand_total_not_found = 0
+def login_dynamed(driver, email, password):
 
-    driver.get(AVAILABLE_CREDITS_URL)
+    st.info("Abriendo DynaMed...")
+
+    driver.get(LOGIN_URL)
+
+    time.sleep(5)
+
+
+    # -----------------------------------------------------------------------
+    # SIGN IN
+    # -----------------------------------------------------------------------
+
+    links = driver.find_elements(
+        By.TAG_NAME,
+        "a"
+    )
+
+    for link in links:
+
+        try:
+
+            if "Sign In" in link.text.strip():
+
+                click_js(
+                    driver,
+                    link
+                )
+
+                break
+
+        except Exception:
+            pass
+
+
+    time.sleep(5)
+
+
+    # -----------------------------------------------------------------------
+    # COOKIES
+    # -----------------------------------------------------------------------
+
+    buttons = driver.find_elements(
+        By.TAG_NAME,
+        "button"
+    )
+
+    for button in buttons:
+
+        try:
+
+            if button.text.strip() == "Accept":
+
+                click_js(
+                    driver,
+                    button
+                )
+
+                time.sleep(2)
+
+                break
+
+        except Exception:
+            pass
+
+
+    # -----------------------------------------------------------------------
+    # EMAIL
+    # -----------------------------------------------------------------------
 
     try:
 
-        WebDriverWait(driver, PAGE_TIMEOUT).until(
+        username = driver.find_element(
+            By.ID,
+            "username"
+        )
+
+        username.clear()
+        username.send_keys(email)
+
+    except Exception as e:
+
+        st.error(
+            "No se encontró el campo de email."
+        )
+
+        st.exception(e)
+
+        return False
+
+
+    # -----------------------------------------------------------------------
+    # CONTINUE EMAIL
+    # -----------------------------------------------------------------------
+
+    buttons = driver.find_elements(
+        By.TAG_NAME,
+        "button"
+    )
+
+    for button in buttons:
+
+        try:
+
+            if button.text.strip() == "Continue":
+
+                click_js(
+                    driver,
+                    button
+                )
+
+                break
+
+        except Exception:
+            pass
+
+
+    time.sleep(5)
+
+
+    # -----------------------------------------------------------------------
+    # PASSWORD
+    # -----------------------------------------------------------------------
+
+    try:
+
+        password_field = driver.find_element(
+            By.ID,
+            "password"
+        )
+
+        password_field.clear()
+        password_field.send_keys(password)
+
+    except Exception as e:
+
+        st.error(
+            "No se encontró el campo de contraseña."
+        )
+
+        st.exception(e)
+
+        return False
+
+
+    # -----------------------------------------------------------------------
+    # LOGIN
+    # -----------------------------------------------------------------------
+
+    buttons = driver.find_elements(
+        By.TAG_NAME,
+        "button"
+    )
+
+    login_button = None
+
+    for button in buttons:
+
+        try:
+
+            if button.text.strip() == "Continue":
+
+                login_button = button
+                break
+
+        except Exception:
+            pass
+
+
+    if login_button is None:
+
+        st.error(
+            "No se encontró el botón Continue de login."
+        )
+
+        return False
+
+
+    click_js(
+        driver,
+        login_button
+    )
+
+    time.sleep(8)
+
+    st.success(
+        "Login realizado correctamente."
+    )
+
+    return True
+
+
+###############################################################################
+# FASE 1 — PREGUNTEITOR
+###############################################################################
+
+def run_pregunteitor(driver, topics_test):
+
+    st.write("---")
+    st.header("📚 FASE 1/2 — Pregunteitor")
+
+    progress = st.progress(0)
+
+    processed_topics = 0
+
+    for number, topic in enumerate(
+        topics_test,
+        start=1
+    ):
+
+        st.write("---")
+
+        st.write(
+            f"**Topic {number}/{len(topics_test)}: {topic}**"
+        )
+
+
+        # -------------------------------------------------------------------
+        # VOLVER A LA PÁGINA PRINCIPAL
+        # -------------------------------------------------------------------
+
+        driver.get(
+            "https://www.dynamed.com"
+        )
+
+        time.sleep(5)
+
+
+        # -------------------------------------------------------------------
+        # ESPERAR AL BUSCADOR
+        # -------------------------------------------------------------------
+
+        search_box = None
+
+        for _ in range(20):
+
+            try:
+
+                search_box = driver.find_element(
+                    By.ID,
+                    "autosuggest"
+                )
+
+                break
+
+            except Exception:
+
+                time.sleep(1)
+
+
+        if search_box is None:
+
+            st.warning(
+                "⚠ No se encontró el buscador de DynaMed."
+            )
+
+            continue
+
+
+        # -------------------------------------------------------------------
+        # LIMPIAR BUSCADOR
+        # -------------------------------------------------------------------
+
+        search_box.click()
+
+        search_box.send_keys(
+            Keys.CONTROL,
+            "a"
+        )
+
+        search_box.send_keys(
+            Keys.BACKSPACE
+        )
+
+        time.sleep(1)
+
+
+        # -------------------------------------------------------------------
+        # ESCRIBIR TOPIC
+        # -------------------------------------------------------------------
+
+        search_box.send_keys(
+            topic
+        )
+
+        time.sleep(2)
+
+
+        # -------------------------------------------------------------------
+        # BUSCAR
+        # -------------------------------------------------------------------
+
+        search_box.send_keys(
+            Keys.ENTER
+        )
+
+        time.sleep(6)
+
+
+        # -------------------------------------------------------------------
+        # BUSCAR RESULTADO DE CONTENIDO
+        # -------------------------------------------------------------------
+
+        links = driver.find_elements(
+            By.TAG_NAME,
+            "a"
+        )
+
+        target_link = None
+
+        for link in links:
+
+            try:
+
+                text = link.text.strip()
+
+                href = link.get_attribute(
+                    "href"
+                )
+
+                if not href:
+                    continue
+
+
+                is_content = (
+                    "/condition/" in href
+                    or "/drug-monograph/" in href
+                    or "/management/" in href
+                    or "/evaluation/" in href
+                    or "/prevention/" in href
+                    or "/procedure/" in href
+                    or "/approach-to/" in href
+                )
+
+                if is_content:
+
+                    target_link = link
+                    break
+
+            except Exception:
+                pass
+
+
+        # -------------------------------------------------------------------
+        # NO ENCONTRADO
+        # -------------------------------------------------------------------
+
+        if target_link is None:
+
+            st.warning(
+                "⚠ No se encontró un resultado de contenido."
+            )
+
+            continue
+
+
+        # -------------------------------------------------------------------
+        # RESULTADO ENCONTRADO
+        # -------------------------------------------------------------------
+
+        target_text = target_link.text.strip()
+
+        st.write(
+            f"✓ encontrado → {target_text}"
+        )
+
+
+        # -------------------------------------------------------------------
+        # ABRIR RESULTADO
+        # -------------------------------------------------------------------
+
+        driver.execute_script(
+            "arguments[0].click();",
+            target_link
+        )
+
+        time.sleep(6)
+
+
+        # -------------------------------------------------------------------
+        # COMPROBAR APERTURA
+        # -------------------------------------------------------------------
+
+        current_url = driver.current_url
+
+        if (
+            "/condition/" in current_url
+            or "/drug-monograph/" in current_url
+            or "/management/" in current_url
+            or "/evaluation/" in current_url
+            or "/prevention/" in current_url
+            or "/procedure/" in current_url
+            or "/approach-to/" in current_url
+        ):
+
+            st.write(
+                "✓ abierto"
+            )
+
+        else:
+
+            st.warning(
+                "⚠ El resultado no parece haberse "
+                "abierto correctamente."
+            )
+
+        processed_topics += 1
+
+        progress.progress(
+            number / len(topics_test)
+        )
+
+
+    st.success(
+        f"✓ Pregunteitor terminado: "
+        f"{processed_topics}/{len(topics_test)} topics procesados."
+    )
+
+    return processed_topics
+
+
+###############################################################################
+# FASE 2 — RESPONDEITOR
+###############################################################################
+
+def run_respondeitor(driver):
+
+    st.write("---")
+    st.header("🎓 FASE 2/2 — Respondeitor")
+
+    st.info(
+        "El login ya está realizado. "
+        "Se reutiliza la misma sesión de DynaMed."
+    )
+
+
+    # -----------------------------------------------------------------------
+    # AVAILABLE CREDITS
+    # -----------------------------------------------------------------------
+
+    st.info(
+        "Abriendo Available Credits..."
+    )
+
+    driver.get(
+        AVAILABLE_CREDITS_URL
+    )
+
+    try:
+
+        WebDriverWait(
+            driver,
+            PAGE_TIMEOUT
+        ).until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "[data-element='tabPanels']")
+                (
+                    By.CSS_SELECTOR,
+                    "[data-element='tabPanels']"
+                )
             )
         )
 
     except Exception as e:
 
-        st.error("No se pudo cargar la página de Available Credits.")
+        st.error(
+            "No se pudo cargar la página de Available Credits."
+        )
 
         st.exception(e)
 
-        return total_credits_done, grand_total_other, grand_total_not_found
+        return 0, 0, 0
+
 
     time.sleep(2)
 
-    select_all_credits(driver)
+    select_all_credits(
+        driver
+    )
 
-    st.success("Opción 'All' seleccionada.")
+    st.success(
+        "Opción 'All' seleccionada."
+    )
 
-    for credit_number in range(1, MAX_CREDITS + 1):
+
+    # -----------------------------------------------------------------------
+    # PROCESAR TODOS LOS CRÉDITOS
+    # -----------------------------------------------------------------------
+
+    total_credits_done = 0
+    grand_total_other = 0
+    grand_total_not_found = 0
+
+
+    for credit_number in range(
+        1,
+        MAX_CREDITS + 1
+    ):
 
         st.write("---")
 
-        st.write(f"**Crédito {credit_number}**")
+        st.write(
+            f"**Crédito {credit_number}**"
+        )
 
         status = st.empty()
 
-        prepared = click_prepare_button(driver)
+
+        # -------------------------------------------------------------------
+        # PREPARE
+        # -------------------------------------------------------------------
+
+        prepared = click_prepare_button(
+            driver
+        )
 
         if not prepared:
 
-            st.write("No quedan más créditos disponibles. Fin.")
+            st.write(
+                "No quedan más créditos disponibles. Fin."
+            )
 
             break
 
-        status.write("· Botón Prepare pulsado, esperando cuestionario...")
+
+        status.write(
+            "· Botón Prepare pulsado, "
+            "esperando cuestionario..."
+        )
+
+
+        # -------------------------------------------------------------------
+        # ESPERAR CUESTIONARIO
+        # -------------------------------------------------------------------
 
         try:
 
-            WebDriverWait(driver, 20).until(
-                lambda d: "questionnaire" in d.current_url.lower()
+            WebDriverWait(
+                driver,
+                20
+            ).until(
+                lambda d:
+                "questionnaire"
+                in d.current_url.lower()
             )
 
         except Exception:
 
             status.write(
-                "⚠ No se detectó el cuestionario tras pulsar Prepare. "
+                "⚠ No se detectó el cuestionario "
+                "tras pulsar Prepare. "
                 "Se pasa al siguiente crédito."
             )
 
-            driver.get(AVAILABLE_CREDITS_URL)
+            driver.get(
+                AVAILABLE_CREDITS_URL
+            )
 
             time.sleep(3)
 
-            select_all_credits(driver)
+            select_all_credits(
+                driver
+            )
 
             continue
 
-        o, nf = process_one_questionnaire(driver, status)
+
+        # -------------------------------------------------------------------
+        # PROCESAR CUESTIONARIO
+        # -------------------------------------------------------------------
+
+        o, nf = process_one_questionnaire(
+            driver,
+            status
+        )
 
         grand_total_other += o
         grand_total_not_found += nf
@@ -676,118 +963,179 @@ def claim_all_credits(driver):
         total_credits_done += 1
 
         st.write(
-            f"✓ Crédito completado. Other: {o} · "
+            f"✓ Crédito completado. "
+            f"Other: {o} · "
             f"I did not find...: {nf}"
         )
 
-        driver.get(AVAILABLE_CREDITS_URL)
+
+        # -------------------------------------------------------------------
+        # VOLVER A AVAILABLE CREDITS
+        # -------------------------------------------------------------------
+
+        driver.get(
+            AVAILABLE_CREDITS_URL
+        )
 
         try:
 
-            WebDriverWait(driver, PAGE_TIMEOUT).until(
+            WebDriverWait(
+                driver,
+                PAGE_TIMEOUT
+            ).until(
                 EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "[data-element='tabPanels']")
+                    (
+                        By.CSS_SELECTOR,
+                        "[data-element='tabPanels']"
+                    )
                 )
             )
 
         except Exception:
             pass
 
+
         time.sleep(2)
 
-        select_all_credits(driver)
+        select_all_credits(
+            driver
+        )
 
-    return total_credits_done, grand_total_other, grand_total_not_found
 
-
-# =========================================================
-# BOTÓN PRINCIPAL
-# =========================================================
-
-if st.button("🚀 Ejecutar Pregunteitor + Respondeitor"):
-
-    if not email or not password:
-
-        st.warning("Introduce email y contraseña.")
-
-        st.stop()
-
-    options = Options()
-
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-    options.binary_location = "/usr/bin/chromium"
-
-    driver = webdriver.Chrome(
-        options=options,
-        service=webdriver.chrome.service.Service("/usr/bin/chromedriver")
-    )
-
-    # ---------------------------------------------------
-    # LOGIN (una sola vez para todo el proceso)
-    # ---------------------------------------------------
-
-    st.info("Abriendo DynaMed e iniciando sesión...")
-
-    try:
-
-        login_dynamed(driver, email, password)
-
-    except Exception as e:
-
-        st.error("No se pudo completar el login.")
-
-        st.exception(e)
-
-        # Si login_dynamed guardó una captura de diagnóstico, mostrarla
-        import glob
-
-        screenshots = glob.glob("/tmp/debug_login_*.png")
-
-        for shot in screenshots:
-
-            st.image(shot, caption=shot)
-
-        driver.quit()
-
-        st.stop()
-
-    st.success("Login realizado correctamente.")
-
-    # ---------------------------------------------------
-    # FASE 1: PREGUNTEITOR
-    # ---------------------------------------------------
-
-    st.header("1️⃣ Pregunteitor: buscando topics")
-
-    topics_status = st.container()
-
-    search_all_topics(driver, topics_test, topics_status)
-
-    st.success(f"🎉 Búsqueda de topics terminada: {len(topics_test)} topics.")
-
-    # ---------------------------------------------------
-    # FASE 2: RESPONDEITOR
-    # ---------------------------------------------------
-
-    st.header("2️⃣ Respondeitor: reclamando créditos")
-
-    total_credits_done, grand_total_other, grand_total_not_found = (
-        claim_all_credits(driver)
-    )
+    # -----------------------------------------------------------------------
+    # RESUMEN
+    # -----------------------------------------------------------------------
 
     st.write("---")
 
     st.success(
-        f"🎉 Proceso terminado. Créditos completados: "
+        f"🎉 Respondeitor terminado. "
+        f"Créditos completados: "
         f"{total_credits_done}"
     )
 
     st.write(
-        f"Total 'Other' seleccionados: {grand_total_other}  \n"
-        f"Total 'I did not find...' seleccionados: {grand_total_not_found}"
+        f"Total 'Other' seleccionados: "
+        f"{grand_total_other}  \n"
+        f"Total 'I did not find...': "
+        f"{grand_total_not_found}"
     )
 
-    driver.quit()
+    return (
+        total_credits_done,
+        grand_total_other,
+        grand_total_not_found
+    )
+
+
+###############################################################################
+# BOTÓN PRINCIPAL — TODO EL PROCESO
+###############################################################################
+
+if st.button(
+    "🚀 Ejecutar Pregunteitor + Respondeitor"
+):
+
+    if not email or not password:
+
+        st.warning(
+            "Introduce email y contraseña."
+        )
+
+        st.stop()
+
+
+    # =======================================================================
+    # CHROME
+    # =======================================================================
+
+    options = Options()
+
+    options.add_argument(
+        "--headless"
+    )
+
+    options.add_argument(
+        "--no-sandbox"
+    )
+
+    options.add_argument(
+        "--disable-dev-shm-usage"
+    )
+
+    options.add_argument(
+        "--window-size=1920,1080"
+    )
+
+    # Configuración utilizada por el Respondeitor
+    # para Streamlit Cloud.
+    options.binary_location = "/usr/bin/chromium"
+
+
+    driver = webdriver.Chrome(
+        options=options,
+        service=webdriver.chrome.service.Service(
+            "/usr/bin/chromedriver"
+        )
+    )
+
+
+    try:
+
+        # ================================================================
+        # LOGIN — UNA SOLA VEZ
+        # ================================================================
+
+        login_ok = login_dynamed(
+            driver,
+            email,
+            password
+        )
+
+        if not login_ok:
+
+            driver.quit()
+            st.stop()
+
+
+        # ================================================================
+        # FASE 1 — PREGUNTEITOR
+        # ================================================================
+
+        run_pregunteitor(
+            driver,
+            topics_test
+        )
+
+
+        # ================================================================
+        # FASE 2 — RESPONDEITOR
+        # ================================================================
+
+        run_respondeitor(
+            driver
+        )
+
+
+        # ================================================================
+        # FIN
+        # ================================================================
+
+        st.write("---")
+
+        st.success(
+            "🎉🎉 PROCESO COMPLETO TERMINADO 🎉🎉"
+        )
+
+    except Exception as e:
+
+        st.error(
+            "Se produjo un error durante el proceso."
+        )
+
+        st.exception(e)
+
+    finally:
+
+        driver.quit()
+
