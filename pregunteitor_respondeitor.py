@@ -1138,5 +1138,3 @@ if st.button(
     finally:
 
         driver.quit()
-
-
